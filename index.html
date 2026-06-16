@@ -163,6 +163,7 @@
         th:hover { color: white; }
         .income-row .amount { color: var(--income); font-weight: 600; }
         .expense-row .amount { color: var(--expense); font-weight: 600; }
+        .savings-row .amount { color: var(--savings); font-weight: 600; }
         .action-btn {
             background: none; border: none; font-size: 1.1rem; cursor: pointer;
             padding: 0.2rem 0.4rem; border-radius: 8px; transition: 0.2s; color: var(--muted);
@@ -452,8 +453,13 @@
 
             function updateSummary() {
                 let totalInc = 0, totalExp = 0;
-                transactions.forEach(t => { if(t.type==='income') totalInc+=t.amount; else totalExp+=t.amount; });
-                document.getElementById('totalBalance').textContent = formatMoney(totalInc - totalExp);
+                transactions.forEach(t => {
+                    if (t.type === 'income') totalInc += t.amount;
+                    else if (t.type === 'expense') totalExp += t.amount;
+                    // Ignora poupanca_dep e poupanca_res
+                });
+                // Saldo total = receitas - despesas + poupança
+                document.getElementById('totalBalance').textContent = formatMoney(totalInc - totalExp + savingsBalance);
                 document.getElementById('totalIncome').textContent = formatMoney(totalInc);
                 document.getElementById('totalExpense').textContent = formatMoney(totalExp);
                 document.getElementById('savingsBalance').textContent = formatMoney(savingsBalance);
@@ -510,7 +516,12 @@
                 tbody.innerHTML = '';
                 sorted.forEach(trans => {
                     const row = document.createElement('tr');
-                    row.className = trans.type === 'income' ? 'income-row' : 'expense-row';
+                    // Define classe de acordo com o tipo (incluindo poupança)
+                    if (trans.type === 'poupanca_dep' || trans.type === 'poupanca_res') {
+                        row.className = 'savings-row';
+                    } else {
+                        row.className = trans.type === 'income' ? 'income-row' : 'expense-row';
+                    }
                     row.innerHTML = `
                         <td>${new Date(trans.date+'T00:00:00').toLocaleDateString('pt-BR')}</td>
                         <td>${trans.desc}</td>
@@ -530,7 +541,12 @@
             function updateChart() {
                 const filtered = getFilteredTransactions();
                 const expenseMap = new Map();
-                filtered.forEach(t => { if(t.type==='expense') expenseMap.set(t.category, (expenseMap.get(t.category)||0)+t.amount); });
+                filtered.forEach(t => {
+                    // Somente despesas reais (ignora poupança)
+                    if (t.type === 'expense') {
+                        expenseMap.set(t.category, (expenseMap.get(t.category)||0) + t.amount);
+                    }
+                });
                 const categories = Array.from(expenseMap.keys());
                 const amounts = categories.map(c=>expenseMap.get(c));
                 const ctx = document.getElementById('expenseChart').getContext('2d');
@@ -592,6 +608,7 @@
                 document.getElementById('editId').value = trans.id;
                 document.getElementById('editDesc').value = trans.desc;
                 document.getElementById('editAmount').value = trans.amount;
+                // Para poupança, não permitir editar o tipo (ou sim)
                 document.getElementById('editType').value = trans.type;
                 document.getElementById('editCategory').value = trans.category;
                 document.getElementById('editDate').value = trans.date;
@@ -630,10 +647,24 @@
                 if (action === 'withdraw' && amount > savingsBalance) { document.getElementById('savingsAmountError').textContent = 'Saldo insuficiente.'; return; }
                 if (action === 'deposit') {
                     savingsBalance += amount;
-                    transactions.unshift({ id: generateId(), desc: 'Depósito na Reserva de Emergência', amount, type: 'expense', category: 'Outros', date: getTodayString() });
+                    transactions.unshift({
+                        id: generateId(),
+                        desc: 'Depósito na Reserva de Emergência',
+                        amount,
+                        type: 'poupanca_dep',  // NOVO TIPO
+                        category: 'Poupança',
+                        date: getTodayString()
+                    });
                 } else {
                     savingsBalance -= amount;
-                    transactions.unshift({ id: generateId(), desc: 'Resgate da Reserva de Emergência', amount, type: 'income', category: 'Outros', date: getTodayString() });
+                    transactions.unshift({
+                        id: generateId(),
+                        desc: 'Resgate da Reserva de Emergência',
+                        amount,
+                        type: 'poupanca_res',
+                        category: 'Poupança',
+                        date: getTodayString()
+                    });
                 }
                 saveToStorage();
                 closeSavingsModal();
@@ -643,7 +674,7 @@
             function exportCSV() {
                 const filtered = getFilteredTransactions();
                 if (!filtered.length) { alert('Sem dados.'); return; }
-                const csv = "Data,Descrição,Categoria,Tipo,Valor\n" + filtered.map(t => `${t.date},"${t.desc}","${t.category}","${t.type==='income'?'Receita':'Despesa'}",${t.amount.toFixed(2)}`).join('\n');
+                const csv = "Data,Descrição,Categoria,Tipo,Valor\n" + filtered.map(t => `${t.date},"${t.desc}","${t.category}","${t.type==='income'?'Receita':t.type==='expense'?'Despesa':'Poupança'}",${t.amount.toFixed(2)}`).join('\n');
                 const blob = new Blob([csv], {type:'text/csv'});
                 const a = document.createElement('a'); a.href=URL.createObjectURL(blob); a.download='financas.csv'; a.click();
             }
